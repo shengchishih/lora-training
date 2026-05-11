@@ -1,0 +1,12 @@
+# RTX 4090 training + captioning dependencies
+torch>=2.1.0
+torchvision>=0.16.0
+transformers>=4.40.0
+diffusers>=0.27.0
+accelerate>=0.27.0
+safetensors>=0.4.0
+bitsandbytes>=0.43.0
+Pillow>=10.0.0
+numpy>=1.24.0
+tqdm>=4.65.0
+peft>=0.10.0
