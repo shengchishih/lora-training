@@ -1,14 +1,12 @@
 # Training data (transfer separately, NOT via git)
 data/raw/
 data/processed/
-data/output/
 
-# Models
+# Base models (too large for git, download separately)
 models/
-*.safetensors
-*.ckpt
-*.pt
-*.bin
+
+# Generated images
+generated/
 
 # Python
 __pycache__/
