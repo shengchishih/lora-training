@@ -45,22 +45,33 @@ def main():
                         help="Output directory")
     args = parser.parse_args()
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if device == "cpu":
+    if torch.cuda.is_available():
+        device = "cuda"
+    elif torch.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+
+    if device == "mps":
+        print("🍎 Using Apple Silicon GPU (MPS). Slower than CUDA but much faster than CPU.")
+    elif device == "cpu":
         print("⚠️  No GPU found. Generation will be very slow.")
+
+    # MPS has limited float16 support — use float32 on Mac
+    dtype = torch.float32 if device == "mps" else torch.float16
 
     # Load base model
     print(f"📥 Loading base model: {args.model}")
     if args.model.endswith(".safetensors"):
         pipe = StableDiffusionXLPipeline.from_single_file(
             args.model,
-            torch_dtype=torch.float16,
+            torch_dtype=dtype,
             use_safetensors=True,
         ).to(device)
     else:
         pipe = StableDiffusionXLPipeline.from_pretrained(
             args.model,
-            torch_dtype=torch.float16,
+            torch_dtype=dtype,
         ).to(device)
 
     # Load LoRA
@@ -71,9 +82,11 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(exist_ok=True)
 
+    # MPS generator must use CPU device
+    gen_device = "cpu" if device == "mps" else device
     generator = None
     if args.seed is not None:
-        generator = torch.Generator(device=device).manual_seed(args.seed)
+        generator = torch.Generator(device=gen_device).manual_seed(args.seed)
 
     print(f"\n🎨 Generating {args.count} images...")
     print(f"   Prompt: {args.prompt}")
@@ -84,7 +97,7 @@ def main():
     for i in range(args.count):
         seed = args.seed + i if args.seed else None
         if seed:
-            generator = torch.Generator(device=device).manual_seed(seed)
+            generator = torch.Generator(device=gen_device).manual_seed(seed)
 
         image = pipe(
             prompt=args.prompt,
