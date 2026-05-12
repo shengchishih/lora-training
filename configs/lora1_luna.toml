@@ -1,5 +1,5 @@
 [sdxl_arguments]
-pretrained_model_name_or_path = "models/realvisxl-v5.safetensors"
+pretrained_model_name_or_path = "models/realvisxl-v5/RealVisXL_V5.0_fp16.safetensors"
 vae = ""
 
 [model_arguments]
@@ -22,10 +22,14 @@ save_every_n_epochs = 5
 train_batch_size = 1
 max_train_epochs = 20
 learning_rate = 1e-4
+unet_lr = 1e-4
+text_encoder_lr = 1e-5
 lr_scheduler = "cosine_with_restarts"
 lr_warmup_steps = 100
 optimizer_type = "AdamW8bit"
-mixed_precision = "fp16"
+mixed_precision = "bf16"
+save_precision = "fp16"
+min_snr_gamma = 5.0
 gradient_checkpointing = true
 gradient_accumulation_steps = 1
 seed = 42

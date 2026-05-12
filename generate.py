@@ -64,11 +64,43 @@ def main():
     # Load base model
     print(f"📥 Loading base model: {args.model}")
     if args.model.endswith(".safetensors"):
+        import os
+        from safetensors import safe_open
+        
+        model_path = os.path.abspath(args.model)
         pipe = StableDiffusionXLPipeline.from_single_file(
-            args.model,
+            model_path,
             torch_dtype=dtype,
             use_safetensors=True,
-        ).to(device)
+            local_files_only=True
+        )
+        
+        # Workaround for diffusers bug: extract text_encoder directly from the safetensors file
+        state_dict = {}
+        with safe_open(model_path, framework="pt", device="cpu") as f:
+            for k in f.keys():
+                if k.startswith("conditioner.embedders.0.transformer."):
+                    new_k = k.replace("conditioner.embedders.0.transformer.", "")
+                    state_dict[new_k] = f.get_tensor(k)
+        
+        # Allocate empty memory for the meta tensor
+        pipe.text_encoder.to_empty(device="cpu")
+        
+        # Clear garbage memory from buffers/parameters
+        for param in pipe.text_encoder.parameters():
+            param.data.zero_()
+        for buf in pipe.text_encoder.buffers():
+            buf.data.zero_()
+            
+        # Re-initialize the position_ids buffer specifically
+        if hasattr(pipe.text_encoder, "text_model"):
+            pipe.text_encoder.text_model.embeddings.position_ids.data = torch.arange(77).expand((1, -1))
+        elif hasattr(pipe.text_encoder, "embeddings"):
+            pipe.text_encoder.embeddings.position_ids.data = torch.arange(77).expand((1, -1))
+            
+        # Load the extracted state dict and move the pipeline to GPU
+        pipe.text_encoder.load_state_dict(state_dict, strict=False)
+        pipe.to(device)
     else:
         pipe = StableDiffusionXLPipeline.from_pretrained(
             args.model,
@@ -84,7 +116,7 @@ def main():
 
     # Generate
     output_dir = Path(args.output)
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # MPS generator must use CPU device
     gen_device = "cpu" if device == "mps" else device

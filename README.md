@@ -95,7 +95,7 @@ Download **RealVisXL V5.0** (SDXL-based, photorealistic):
 source .venv/bin/activate
 pip install huggingface-hub
 mkdir -p models
-huggingface-cli download SG161222/RealVisXL_V5.0 \
+hf download SG161222/RealVisXL_V5.0 \
   --local-dir models/realvisxl-v5 \
   --include "*.safetensors"
 ```

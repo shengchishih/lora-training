@@ -1,5 +1,6 @@
 # RTX 4090 training + captioning dependencies
-torch>=2.1.0
+--extra-index-url https://download.pytorch.org/whl/cu126
+torch>=2.11.0
 torchvision>=0.16.0
 transformers>=4.40.0
 diffusers>=0.27.0
