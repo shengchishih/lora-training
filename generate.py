@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import time
 from pathlib import Path
 
 import torch
@@ -18,10 +19,10 @@ from safetensors.torch import load_file
 
 def main():
     parser = argparse.ArgumentParser(description="Generate images with trained LoRA")
-    parser.add_argument("--lora", type=str, required=True,
-                        help="Path to trained LoRA .safetensors file")
-    parser.add_argument("--model", type=str, default="models/realvisxl-v5.safetensors",
-                        help="Base model path")
+    parser.add_argument("--lora", type=str, default=None,
+                        help="Path to trained LoRA .safetensors file (optional — omit to use base model only)")
+    parser.add_argument("--model", type=str, default="models/realvisxl-v5",
+                        help="Base model path (directory or .safetensors file)")
     parser.add_argument("--prompt", type=str, required=True,
                         help="Generation prompt (include trigger word!)")
     parser.add_argument("--negative", type=str,
@@ -74,9 +75,12 @@ def main():
             torch_dtype=dtype,
         ).to(device)
 
-    # Load LoRA
-    print(f"📥 Loading LoRA: {args.lora}")
-    pipe.load_lora_weights(args.lora)
+    # Load LoRA (optional)
+    if args.lora:
+        print(f"📥 Loading LoRA: {args.lora}")
+        pipe.load_lora_weights(args.lora)
+    else:
+        print("ℹ️  No LoRA specified — using base model only")
 
     # Generate
     output_dir = Path(args.output)
@@ -94,12 +98,15 @@ def main():
     print(f"   Steps: {args.steps} | CFG: {args.cfg}")
     print(f"   Size: {args.width}×{args.height}")
 
+    total_start = time.time()
+
     for i in range(args.count):
         seed = args.seed + i if args.seed else None
         if seed:
             generator = torch.Generator(device=gen_device).manual_seed(seed)
 
-        image = pipe(
+        # Only pass LoRA scale when a LoRA is loaded
+        pipe_kwargs = dict(
             prompt=args.prompt,
             negative_prompt=args.negative,
             num_inference_steps=args.steps,
@@ -107,14 +114,22 @@ def main():
             width=args.width,
             height=args.height,
             generator=generator,
-            cross_attention_kwargs={"scale": args.lora_scale},
-        ).images[0]
+        )
+        if args.lora:
+            pipe_kwargs["cross_attention_kwargs"] = {"scale": args.lora_scale}
+
+        img_start = time.time()
+        image = pipe(**pipe_kwargs).images[0]
+        img_time = time.time() - img_start
 
         filename = f"gen_{i + 1:03d}.png"
         image.save(output_dir / filename)
-        print(f"  ✅ Saved: {output_dir / filename}")
+        print(f"  ✅ [{i + 1}/{args.count}] Saved: {output_dir / filename}  ⏱️ {img_time:.1f}s")
 
+    total_time = time.time() - total_start
+    avg_time = total_time / args.count
     print(f"\n🎉 Done! {args.count} images saved to {output_dir}/")
+    print(f"⏱️  Total: {total_time:.1f}s | Average: {avg_time:.1f}s per image")
 
 
 if __name__ == "__main__":
