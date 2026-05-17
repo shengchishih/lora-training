@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-05_caption.py — Auto-caption training images using JoyCaption or Florence-2.
+05_caption.py — Auto-caption training images using JoyCaption, Florence-2, or Qwen2.5-VL.
 
 Runs on the RTX 4090 machine. Generates a .txt file alongside each image
 with a natural language description + trigger word.
@@ -8,10 +8,10 @@ with a natural language description + trigger word.
 Usage:
     python scripts/05_caption.py --subject luna --trigger lttluna [--model joycaption]
     python scripts/05_caption.py --subject scene --trigger ankdlisla [--model florence]
+    python scripts/05_caption.py --subject luna --trigger lttluna [--model qwen]
 """
 
 import argparse
-import os
 from pathlib import Path
 
 import torch
@@ -20,18 +20,20 @@ from tqdm import tqdm
 
 
 def load_joycaption():
-    """Load JoyCaption Alpha Two model."""
+    """Load JoyCaption Alpha Two using the model author's supported settings."""
     from transformers import AutoProcessor, LlavaForConditionalGeneration
 
     model_id = "fancyfeast/llama-joycaption-alpha-two-hf-llava"
     print(f"📥 Loading JoyCaption from {model_id}...")
     print("   (First run downloads ~8GB — subsequent runs use cache)")
+    print("   Using bfloat16 on the GPU for the supported inference path")
 
-    processor = AutoProcessor.from_pretrained(model_id)
+    processor = AutoProcessor.from_pretrained(model_id, use_fast=True)
     model = LlavaForConditionalGeneration.from_pretrained(
         model_id,
-        torch_dtype=torch.float16,
+        torch_dtype=torch.bfloat16,
         device_map="auto",
+        low_cpu_mem_usage=True,
     )
     model.eval()
     return processor, model, "joycaption"
@@ -57,41 +59,82 @@ def load_florence():
     return processor, model, "florence"
 
 
+def load_qwen():
+    """Load Qwen2.5-VL 3B for lower-memory image captioning."""
+    from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
+
+    model_id = "Qwen/Qwen2.5-VL-3B-Instruct"
+    print(f"📥 Loading Qwen2.5-VL from {model_id}...")
+    print("   (First run downloads ~8GB)")
+    print("   Using bf16 with capped image resolution for better throughput")
+
+    processor = AutoProcessor.from_pretrained(
+        model_id,
+        use_fast=True,
+        min_pixels=256 * 28 * 28,
+        max_pixels=1280 * 28 * 28,
+    )
+    model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
+        model_id,
+        torch_dtype=torch.bfloat16,
+        device_map="auto",
+        low_cpu_mem_usage=True,
+    )
+    model.eval()
+    model.generation_config.do_sample = False
+    model.generation_config.temperature = None
+    return processor, model, "qwen"
+
+
 def caption_joycaption(image_path: Path, processor, model, trigger: str) -> str:
     """Generate caption using JoyCaption."""
-    image = Image.open(image_path).convert("RGB")
-
     prompt = "Write a detailed description of this image for AI image generation training. " \
              "Describe the person's appearance, clothing, pose, expression, setting, and lighting. " \
              "Be specific and descriptive. Do not include any ethical commentary."
 
     conversation = [
-        {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt}]},
+        {"role": "system", "content": "You are a helpful image captioner."},
+        {"role": "user", "content": prompt},
     ]
-    inputs = processor.apply_chat_template(
-        conversation, add_generation_prompt=True, tokenize=True,
-        return_dict=True, return_tensors="pt"
-    ).to(model.device)
-
-    # Add the image
-    inputs["pixel_values"] = processor.image_processor(image, return_tensors="pt")["pixel_values"].to(
-        model.device, dtype=model.dtype
+    text = processor.apply_chat_template(
+        conversation,
+        add_generation_prompt=True,
+        tokenize=False,
     )
 
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=256,
-            do_sample=True,
-            temperature=0.6,
-            top_p=0.9,
-        )
+    image = None
+    inputs = None
+    outputs = None
+    try:
+        with Image.open(image_path) as image_file:
+            image = image_file.convert("RGB")
+            inputs = processor(text=[text], images=[image], return_tensors="pt").to(model.device)
+            inputs["pixel_values"] = inputs["pixel_values"].to(dtype=torch.bfloat16)
 
-    # Decode only new tokens
-    caption = processor.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
+        with torch.inference_mode():
+            outputs = model.generate(
+                **inputs,
+                max_new_tokens=150,
+                do_sample=True,
+                suppress_tokens=None,
+                use_cache=True,
+                temperature=0.6,
+                top_p=0.9,
+            )
 
-    # Prepend trigger word
-    return f"{trigger}, {caption}"
+        input_len = inputs["input_ids"].shape[1]
+        caption = processor.tokenizer.decode(
+            outputs[0][input_len:],
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        ).strip()
+        return f"{trigger}, {caption}"
+    finally:
+        del inputs, outputs
+        if image is not None:
+            image.close()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 def caption_florence(image_path: Path, processor, model, trigger: str) -> str:
@@ -121,13 +164,75 @@ def caption_florence(image_path: Path, processor, model, trigger: str) -> str:
     return f"{trigger}, {caption}"
 
 
+def caption_qwen(image_path: Path, processor, model, trigger: str) -> str:
+    """Generate caption using Qwen2.5-VL."""
+    prompt = (
+        "Describe this image for LoRA training in one detailed sentence. "
+        "Focus on appearance, clothing, pose, expression, setting, and lighting. "
+        "Do not include safety commentary, markdown, or bullet points."
+    )
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {"type": "image", "image": f"file://{image_path.resolve()}"},
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+    text = processor.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+    image = None
+    inputs = None
+    generated_ids = None
+    try:
+        with Image.open(image_path) as image_file:
+            image = image_file.convert("RGB")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            inputs = processor(
+                text=[text],
+                images=[image],
+                padding=True,
+                return_tensors="pt",
+            ).to(device)
+
+        with torch.inference_mode():
+            generated_ids = model.generate(
+                **inputs,
+                max_new_tokens=96,
+                do_sample=False,
+                use_cache=True,
+            )
+
+        trimmed_ids = [
+            out_ids[len(in_ids):]
+            for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+        ]
+        caption = processor.batch_decode(
+            trimmed_ids,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )[0].strip()
+        return f"{trigger}, {caption}"
+    finally:
+        del inputs, generated_ids
+        if image is not None:
+            image.close()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Auto-caption training images")
     parser.add_argument("--subject", type=str, required=True, choices=["luna", "scene"],
                         help="Which subject folder to caption")
     parser.add_argument("--trigger", type=str, required=True,
                         help="Trigger word to prepend (e.g., 'lttluna')")
-    parser.add_argument("--model", type=str, default="joycaption", choices=["joycaption", "florence"],
+    parser.add_argument("--model", type=str, default="joycaption", choices=["joycaption", "florence", "qwen"],
                         help="Captioning model (default: joycaption)")
     parser.add_argument("--input", type=str, default="data/processed",
                         help="Base directory with processed images")
@@ -153,6 +258,9 @@ def main():
     if args.model == "joycaption":
         processor, model, model_type = load_joycaption()
         caption_fn = caption_joycaption
+    elif args.model == "qwen":
+        processor, model, model_type = load_qwen()
+        caption_fn = caption_qwen
     else:
         processor, model, model_type = load_florence()
         caption_fn = caption_florence

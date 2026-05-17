@@ -14,7 +14,45 @@ from pathlib import Path
 
 import torch
 from diffusers import StableDiffusionXLPipeline
-from safetensors.torch import load_file
+
+
+def resolve_base_model_path(model_arg: str) -> tuple[Path, bool]:
+    model_path = Path(model_arg).expanduser()
+
+    if model_path.is_file():
+        if model_path.suffix != ".safetensors":
+            raise ValueError(f"Base model file must be a .safetensors checkpoint: {model_path}")
+        return model_path, True
+
+    if model_path.is_dir():
+        safetensors_files = sorted(model_path.glob("*.safetensors"))
+        if len(safetensors_files) == 1:
+            return safetensors_files[0], True
+        if (model_path / "model_index.json").exists():
+            return model_path, False
+        if len(safetensors_files) > 1:
+            raise ValueError(
+                f"Multiple .safetensors files found in {model_path}. Pass the exact checkpoint file you want to use."
+            )
+        raise FileNotFoundError(
+            f"No .safetensors checkpoint or Diffusers model was found in {model_path}."
+        )
+
+    if model_path.suffix == ".safetensors":
+        sibling_dir = model_path.with_suffix("")
+        if sibling_dir.is_dir():
+            safetensors_files = sorted(sibling_dir.glob("*.safetensors"))
+            if len(safetensors_files) == 1:
+                return safetensors_files[0], True
+            if len(safetensors_files) > 1:
+                raise ValueError(
+                    f"{model_path} does not exist, and {sibling_dir} contains multiple .safetensors files. "
+                    "Pass the exact checkpoint file you want to use."
+                )
+
+    raise FileNotFoundError(
+        f"Base model path not found: {model_path}. Pass a Diffusers model directory or a .safetensors checkpoint."
+    )
 
 
 def main():
@@ -62,12 +100,13 @@ def main():
     dtype = torch.float32 if device == "mps" else torch.float16
 
     # Load base model
-    print(f"📥 Loading base model: {args.model}")
-    if args.model.endswith(".safetensors"):
+    model_path, is_single_file = resolve_base_model_path(args.model)
+    print(f"📥 Loading base model: {model_path}")
+    if is_single_file:
         import os
         from safetensors import safe_open
         
-        model_path = os.path.abspath(args.model)
+        model_path = os.path.abspath(model_path)
         pipe = StableDiffusionXLPipeline.from_single_file(
             model_path,
             torch_dtype=dtype,
@@ -103,7 +142,7 @@ def main():
         pipe.to(device)
     else:
         pipe = StableDiffusionXLPipeline.from_pretrained(
-            args.model,
+            str(model_path),
             torch_dtype=dtype,
         ).to(device)
 

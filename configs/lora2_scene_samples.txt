@@ -1,0 +1,4 @@
+# Training-time monitoring prompts for the Scene LoRA.
+ankdlisla, two women, cinematic studio portrait, dramatic rim lighting, realistic photo --w 1024 --h 1024 --s 30 --l 7 --d 52 --n blurry, low quality, deformed, extra limbs, text, watermark
+ankdlisla, two women walking outdoors, candid fashion photography, golden hour lighting --w 1216 --h 832 --s 30 --l 7 --d 53 --n blurry, low quality, deformed, extra limbs, text, watermark
+ankdlisla, two women seated at a cafe table, natural light, editorial lifestyle photo --w 832 --h 1216 --s 30 --l 7 --d 54 --n blurry, low quality, deformed, extra limbs, text, watermark

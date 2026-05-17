@@ -1,18 +1,9 @@
 [sdxl_arguments]
 pretrained_model_name_or_path = "models/realvisxl-v5/RealVisXL_V5.0_fp16.safetensors"
-vae = ""
 
 [model_arguments]
 v2 = false
 v_parameterization = false
-
-[dataset_arguments]
-train_data_dir = "data/processed/scene"
-resolution = "1024,1024"
-enable_bucket = true
-min_bucket_reso = 512
-max_bucket_reso = 2048
-bucket_reso_steps = 64
 
 [training_arguments]
 output_dir = "data/output"
@@ -45,8 +36,3 @@ network_dim = 32
 network_alpha = 16
 network_train_unet_only = false
 network_train_text_encoder_only = false
-
-[caption_arguments]
-caption_extension = ".txt"
-shuffle_caption = true
-keep_tokens = 1

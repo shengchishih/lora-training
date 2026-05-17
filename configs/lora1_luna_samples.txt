@@ -1,0 +1,4 @@
+# Training-time monitoring prompts for Luna.
+lttluna, portrait photo of a blonde woman, soft window light, realistic skin detail --w 1024 --h 1024 --s 30 --l 7 --d 42 --n blurry, low quality, deformed, extra fingers, text, watermark
+lttluna, full body fashion photo, white summer dress, city street, shallow depth of field --w 832 --h 1216 --s 30 --l 7 --d 43 --n blurry, low quality, deformed, extra fingers, text, watermark
+lttluna, candid indoor photo on a sofa, cozy sweater, warm ambient light --w 1216 --h 832 --s 30 --l 7 --d 44 --n blurry, low quality, deformed, extra fingers, text, watermark

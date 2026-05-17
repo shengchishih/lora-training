@@ -1,6 +1,8 @@
 # Training data (transfer separately, NOT via git)
 data/raw/
 data/processed/
+data/output
+data/logs/
 
 # Base models (too large for git, download separately)
 models/
